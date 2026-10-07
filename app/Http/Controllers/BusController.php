@@ -553,68 +553,94 @@ public function blockTicket(Request $request)
             ], 500);
         }
 
-        /*
-         * Handle eTravos API error object
-         */
-        if (
-            isset($result['error']) &&
-            is_array($result['error']) &&
-            !empty($result['error'])
-        ) {
-            return response()->json([
-                'success' => false,
-                'message' => $result['error']['desc']
-                    ?? 'Unable to block the selected seats.',
-                'data' => $result,
-            ], 422);
-        }
+       
+/*
+ * Check for an API-level error first.
+ */
+if (
+    isset($result['error']) &&
+    (
+        $result['error'] === true ||
+        (is_array($result['error']) && !empty($result['error']))
+    )
+) {
+    session()->forget(['etravos_block', 'razorpay_order']);
 
-        /*
-         * refNo is required for BOOK.
-         */
-        $refNo = $result['refNo'] ?? null;
+    return response()->json([
+        'success' => false,
+        'message' => is_array($result['error'])
+            ? ($result['error']['desc'] ?? 'eTravos block request failed.')
+            : ($result['message'] ?? 'eTravos block request failed.'),
+    ], 422);
+}
 
-        /*
-         * Some responses may put refNo inside trips.
-         */
-        if (!$refNo && !empty($result['trips'])) {
-            foreach ($result['trips'] as $trip) {
-                if (!empty($trip['refNo'])) {
-                    $refNo = $trip['refNo'];
-                    break;
-                }
-            }
-        }
+/*
+ * Check the individual trip result.
+ * eTravos can return an error inside trips even when
+ * the top-level response has no error.
+ */
+$tripResult = $result['trips'][0] ?? null;
 
-        if (!$refNo) {
-            Log::error('eTravos BLOCK succeeded but refNo was missing', [
-                'response' => $result,
-            ]);
+$tripError = $tripResult['error'] ?? null;
+$tripStatus = strtoupper((string) ($tripResult['status'] ?? ''));
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Seats could not be blocked because the booking reference was not returned.',
-                'data' => $result,
-            ], 500);
-        }
+if (
+    !is_array($tripResult) ||
+    !empty($tripError) ||
+    str_contains($tripStatus, 'FAIL')
+) {
+    session()->forget(['etravos_block', 'razorpay_order']);
 
+    Log::warning('eTravos seat block failed', [
+        'traceId' => $request->traceId,
+        'status' => $tripStatus ?: 'MISSING',
+        'error_code' => is_array($tripError)
+            ? ($tripError['code'] ?? null)
+            : null,
+        'error_message' => is_array($tripError)
+            ? ($tripError['desc'] ?? null)
+            : null,
+    ]);
+
+    return response()->json([
+        'success' => false,
+        'message' => is_array($tripError)
+            ? ($tripError['desc'] ?? 'eTravos could not block the seats.')
+            : 'eTravos could not block the seats. Please try again.',
+    ], 422);
+}
+
+/*
+ * Extract the reference only after checking the trip result.
+ */
+$refNo = $tripResult['refNo'] ?? $result['refNo'] ?? null;
+
+if (empty($refNo)) {
+    session()->forget(['etravos_block', 'razorpay_order']);
+
+    return response()->json([
+        'success' => false,
+        'message' => 'eTravos did not return a valid booking reference.',
+    ], 422);
+}
         /*
          * Store the block information in Laravel session.
          * This allows the payment/book step to use refNo later.
          */
-        session([
-            'etravos_block' => [
-                'refNo' => $refNo,
-                'traceId' => $request->traceId,
-                'tripKey' => $request->tripKey,
-                'bpid' => $request->bpid,
-                'dpid' => $request->dpid,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'passengers' => $request->passengers,
-                'response' => $result,
-            ],
-        ]);
+       
+session([
+    'etravos_block' => [
+        'refNo' => (string) $refNo,
+        'traceId' => (string) $request->traceId,
+        'tripKey' => (string) $request->tripKey,
+        'bpid' => (string) $request->bpid,
+        'dpid' => (string) $request->dpid,
+        'email' => (string) $request->email,
+        'phone' => (string) $request->phone,
+        'passengers' => $request->passengers,
+        'response' => $result,
+    ],
+]);
 
         return response()->json([
             'success' => true,
@@ -730,11 +756,12 @@ public function bookTicket(Request $request)
         );
 
         Log::info('eTravos BOOK response', [
-            'refNo' => $request->refNo,
-            'error' => $result['error'] ?? null,
-            'tktNo' => $result['tktNo'] ?? null,
-            'pnrNo' => $result['pnrNo'] ?? null,
-        ]);
+    'refNo' => $request->refNo,
+    'error' => $result['error'] ?? null,
+    'status' => $result['trips'][0]['status'] ?? null,
+    'tktNo' => $result['trips'][0]['tktNo'] ?? null,
+    'pnrNo' => $result['trips'][0]['pnrNo'] ?? null,
+]);
 
         /*
          * Handle our service-level error.
@@ -766,47 +793,98 @@ public function bookTicket(Request $request)
             ], 422);
         }
 
-        /*
-         * eTravos BOOK should return a ticket number.
-         */
-        $ticketNumber = $result['tktNo'] ?? null;
+      /*
+ * eTravos BOOK response contains the booking
+ * information inside trips[0].
+ */
+$tripResult = $result['trips'][0] ?? [];
 
-        if (!$ticketNumber) {
-            Log::error('eTravos BOOK response missing tktNo', [
-                'refNo' => $request->refNo,
-                'response' => $result,
-            ]);
+$tripStatus = strtoupper((string) ($tripResult['status'] ?? ''));
+$tripError = $tripResult['error'] ?? null;
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Booking response did not contain a ticket number.',
-                'data' => $result,
-            ], 500);
-        }
+$ticketNumber = $tripResult['tktNo'] ?? null;
+$pnrNumber = $tripResult['pnrNo'] ?? null;
+$tktKey = $tripResult['tktKey'] ?? null;
+$tripRefNo = $tripResult['refNo'] ?? $sessionRefNo;
+$operatorNumber = $tripResult['operatorNumber'] ?? null;
 
-        /*
-         * Store successful booking information in Laravel session.
-         */
-        session([
-            'etravos_booking' => [
-                'refNo' => $request->refNo,
-                'tktNo' => $result['tktNo'] ?? null,
-                'pnrNo' => $result['pnrNo'] ?? null,
-                'tktKey' => $result['tktKey'] ?? null,
-                'operatorNumber' => $result['operatorNumber'] ?? null,
-                'response' => $result,
-            ],
-        ]);
+/*
+ * Check trip-level error.
+ */
+if (!empty($tripError)) {
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Ticket booked successfully.',
-            'tktNo' => $result['tktNo'] ?? null,
-            'pnrNo' => $result['pnrNo'] ?? null,
-            'tktKey' => $result['tktKey'] ?? null,
-            'operatorNumber' => $result['operatorNumber'] ?? null,
-            'data' => $result,
-        ]);
+    Log::error('eTravos BOOK trip failed', [
+        'refNo' => $refNo,
+        'status' => $tripStatus,
+        'error_code' => is_array($tripError)
+            ? ($tripError['code'] ?? null)
+            : null,
+        'error_message' => is_array($tripError)
+            ? ($tripError['desc'] ?? null)
+            : null,
+    ]);
+
+    return response()->json([
+        'success' => false,
+        'message' => is_array($tripError)
+            ? ($tripError['desc'] ?? 'Payment succeeded, but ticket booking failed.')
+            : 'Payment succeeded, but ticket booking failed.',
+        'payment_verified' => true,
+        'booking_failed' => true,
+        'data' => $result,
+    ], 422);
+}
+
+/*
+ * Confirm that eTravos actually confirmed the booking.
+ */
+if ($tripStatus !== 'CONFIRMED' || empty($ticketNumber)) {
+
+    Log::error('eTravos BOOK returned unexpected response', [
+        'refNo' => $refNo,
+        'status' => $tripStatus,
+        'has_ticket' => !empty($ticketNumber),
+        'response' => $result,
+    ]);
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Payment was successful, but ticket confirmation was not received.',
+        'payment_verified' => true,
+        'booking_failed' => true,
+        'data' => $result,
+    ], 500);
+}
+
+
+
+/*
+ * Store the confirmed ticket separately.
+ * Keep the original etravos_block session unchanged.
+ */
+session([
+    'etravos_booking' => [
+        'refNo' => (string) $tripRefNo,
+        'tktNo' => $ticketNumber,
+        'pnrNo' => $pnrNumber,
+        'tktKey' => $tktKey,
+        'operatorNumber' => $operatorNumber,
+        'status' => $tripStatus,
+        'response' => $result,
+    ],
+]);
+
+return response()->json([
+    'success' => true,
+    'message' => 'Ticket booked successfully.',
+    'refNo' => $tripRefNo,
+    'tktNo' => $ticketNumber,
+    'pnrNo' => $pnrNumber,
+    'tktKey' => $tktKey,
+    'operatorNumber' => $operatorNumber,
+    'status' => $tripStatus,
+    'data' => $result,
+]);
 
     } catch (\Throwable $e) {
 
@@ -927,7 +1005,20 @@ public function getTicketDetails(Request $request)
 }
 public function paymentPage()
 {
-    return view('frontend.payment');
+    $blockData = session('etravos_block');
+
+    if (empty($blockData) || empty($blockData['refNo'])) {
+        return redirect()
+    ->route('bus.list')
+    ->with(
+        'error',
+        'No active bus booking was found. Please select your bus and seats again.'
+    );
+    }
+
+    return view('frontend.payment', [
+        'blockData' => $blockData,
+    ]);
 }
 public function ticketPage()
 {
@@ -1256,12 +1347,15 @@ public function verifyRazorpayPayment(Request $request)
 
         $result = $this->etravos->bookTicket($refNo);
 
-        Log::info('eTravos BOOK response after successful payment', [
-            'refNo' => $refNo,
-            'error' => $result['error'] ?? null,
-            'tktNo' => $result['tktNo'] ?? null,
-            'pnrNo' => $result['pnrNo'] ?? null,
-        ]);
+       $tripResult = $result['trips'][0] ?? [];
+
+Log::info('eTravos BOOK response after successful payment', [
+    'refNo' => $refNo,
+    'status' => $tripResult['status'] ?? null,
+    'error' => $tripResult['error'] ?? null,
+    'tktNo' => $tripResult['tktNo'] ?? null,
+    'pnrNo' => $tripResult['pnrNo'] ?? null,
+]);
 
         /*
          * Handle service-level error.
@@ -1297,65 +1391,81 @@ public function verifyRazorpayPayment(Request $request)
             ], 422);
         }
 
-        $ticketNumber = $result['tktNo'] ?? null;
+       /*
+ * eTravos BOOK response contains booking details
+ * inside trips[0].
+ */
+$tripResult = $result['trips'][0] ?? [];
 
-        if (!$ticketNumber) {
+$tripStatus = strtoupper((string) ($tripResult['status'] ?? ''));
+$tripError = $tripResult['error'] ?? null;
 
-            Log::error('eTravos BOOK succeeded without ticket number', [
-                'refNo' => $refNo,
-                'response' => $result,
-            ]);
+$ticketNumber = $tripResult['tktNo'] ?? null;
+$pnrNumber = $tripResult['pnrNo'] ?? null;
+$tktKey = $tripResult['tktKey'] ?? null;
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Payment was successful, but ticket number was not returned.',
-                'payment_verified' => true,
-                'booking_failed' => true,
-            ], 500);
-        }
+/*
+ * Handle trip-level API error.
+ */
+if (!empty($tripError)) {
 
-        /*
-         * Save successful booking.
-         */
-        session([
-            'etravos_booking' => [
-                'refNo' => $refNo,
-                'tktNo' => $result['tktNo'] ?? null,
-                'pnrNo' => $result['pnrNo'] ?? null,
-                'tktKey' => $result['tktKey'] ?? null,
-                'operatorNumber' => $result['operatorNumber'] ?? null,
-                'response' => $result,
-            ],
+    return response()->json([
+        'success' => false,
+        'message' => is_array($tripError)
+            ? ($tripError['desc'] ?? 'Unable to book the ticket.')
+            : 'Unable to book the ticket.',
+        'data' => $result,
+    ], 422);
+}
 
-            'razorpay_payment' => [
-                'order_id' => $request->razorpay_order_id,
-                'payment_id' => $request->razorpay_payment_id,
-                'signature' => $request->razorpay_signature,
-                'refNo' => $refNo,
-            ],
-        ]);
+/*
+ * Booking must be CONFIRMED and must contain a ticket number.
+ */
+if ($tripStatus !== 'CONFIRMED' || empty($ticketNumber)) {
 
-        Log::info('Bus booking completed successfully', [
-            'refNo' => $refNo,
-            'tktNo' => $result['tktNo'] ?? null,
-            'pnrNo' => $result['pnrNo'] ?? null,
-        ]);
+    Log::error('eTravos BOOK response missing confirmed ticket', [
+        'refNo' => $request->refNo,
+        'status' => $tripStatus,
+        'response' => $result,
+    ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Payment verified and ticket booked successfully.',
-            'payment_verified' => true,
-            'booking_completed' => true,
-            'tktNo' => $result['tktNo'] ?? null,
-            'pnrNo' => $result['pnrNo'] ?? null,
-            'tktKey' => $result['tktKey'] ?? null,
-            'operatorNumber' => $result['operatorNumber'] ?? null,
-            'data' => $result,
-        ]);
+    return response()->json([
+        'success' => false,
+        'message' => 'Booking response did not contain a confirmed ticket number.',
+        'data' => $result,
+    ], 500);
+}
+
+/*
+ * Store confirmed ticket.
+ */
+session([
+    'etravos_booking' => [
+        'refNo' => (string) $sessionRefNo,
+        'tktNo' => $ticketNumber,
+        'pnrNo' => $pnrNumber,
+        'tktKey' => $tktKey,
+        'operatorNumber' => $tripResult['operatorNumber'] ?? null,
+        'status' => $tripStatus,
+        'response' => $result,
+    ],
+]);
+
+return response()->json([
+    'success' => true,
+    'message' => 'Ticket booked successfully.',
+    'refNo' => $sessionRefNo,
+    'tktNo' => $ticketNumber,
+    'pnrNo' => $pnrNumber,
+    'tktKey' => $tktKey,
+    'operatorNumber' => $tripResult['operatorNumber'] ?? null,
+    'status' => $tripStatus,
+    'data' => $result,
+]);
 
     } catch (\Throwable $e) {
 
-        Log::error('Razorpay payment verification error', [
+        Log::error('Razorpay payment verification / eTravos BOOK error', [
             'message' => $e->getMessage(),
             'file' => $e->getFile(),
             'line' => $e->getLine(),
@@ -1363,12 +1473,11 @@ public function verifyRazorpayPayment(Request $request)
 
         return response()->json([
             'success' => false,
-            'message' => 'Payment verification failed.',
+            'message' => 'Payment verification or ticket booking failed.',
             'error' => $e->getMessage(),
         ], 500);
     }
 }
-
 }
 
 

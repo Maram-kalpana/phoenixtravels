@@ -493,21 +493,19 @@ $(document).ready(function () {
         $button.prop('disabled', true).text('Blocking Seats...');
 
         $.ajax({
-            url: '{{ route("bus.block") }}',
-            type: 'POST',
-            dataType: 'json',
-            headers: {
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            },
-            data: {
-                traceId: traceId,
-                tripKey: tripKey,
-                bpid: String(bpid),
-                dpid: String(dpid),
-                email: email,
-                phone: phone,
-                passengers: passengers
-            },
+    url: "{{ route('bus.block') }}",
+    type: "POST",
+    data: {
+        _token: "{{ csrf_token() }}",
+        traceId: traceId,
+        tripKey: tripKey,
+        bpid: bpid,
+        dpid: dpid,
+        email: email,
+        phone: phone,
+        passengers: passengers,
+        totalAmount: totalAmount
+    },
             success: function (response) {
 
     if (!response.success || !response.refNo) {

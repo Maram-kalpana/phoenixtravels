@@ -1,4 +1,3 @@
-
 @extends('layouts.web')
 
 @section('title', 'Payment - Phoenix Tours & Travels')
@@ -6,82 +5,128 @@
 @section('content')
 
 <div class="container py-5">
+
     <div class="row justify-content-center">
+
         <div class="col-lg-7 col-md-9">
 
             <div class="card shadow-sm border-0">
+
                 <div class="card-body p-4 p-md-5">
 
                     <div class="text-center mb-4">
-                        <h2 class="mb-2">Complete Your Payment</h2>
+
+                        <h2 class="mb-2">
+                            Complete Your Payment
+                        </h2>
+
                         <p class="text-muted mb-0">
                             Secure payment powered by Razorpay
                         </p>
+
                     </div>
 
+
                     {{-- Booking Information --}}
+
                     <div class="border rounded p-3 mb-4">
-                        <h5 class="mb-3">Booking Details</h5>
+
+                        <h5 class="mb-3">
+                            Booking Details
+                        </h5>
 
                         <div class="row mb-2">
+
                             <div class="col-6 text-muted">
                                 Reference Number
                             </div>
-                            <div class="col-6 text-end fw-semibold"
-                                 id="bookingRefNo">
-                                --
+
+                            <div
+                                class="col-6 text-end fw-semibold"
+                                id="bookingRefNo"
+                            >
+                                {{ $blockData['refNo'] ?? '--' }}
                             </div>
+
                         </div>
 
+
                         <div class="row mb-2">
+
                             <div class="col-6 text-muted">
                                 Selected Seats
                             </div>
-                            <div class="col-6 text-end fw-semibold"
-                                 id="selectedSeats">
+
+                            <div
+                                class="col-6 text-end fw-semibold"
+                                id="selectedSeats"
+                            >
                                 --
                             </div>
+
                         </div>
 
+
                         <div class="row">
+
                             <div class="col-6 text-muted">
                                 Total Amount
                             </div>
-                            <div class="col-6 text-end fw-bold fs-5"
-                                 id="totalAmount">
+
+                            <div
+                                class="col-6 text-end fw-bold fs-5"
+                                id="totalAmount"
+                            >
                                 ₹0.00
                             </div>
+
                         </div>
+
                     </div>
+
 
                     {{-- Payment Status --}}
-                    <div id="paymentMessage"
-                         class="alert d-none"
-                         role="alert">
+
+                    <div
+                        id="paymentMessage"
+                        class="alert d-none"
+                        role="alert"
+                    >
                     </div>
 
+
                     {{-- Pay Button --}}
+
                     <div class="text-center">
+
                         <button
                             type="button"
                             id="payNowBtn"
-                            class="btn btn-primary btn-lg px-5">
+                            class="btn btn-primary btn-lg px-5"
+                        >
                             Pay Now
                         </button>
+
                     </div>
 
+
                     <div class="text-center mt-3">
+
                         <small class="text-muted">
                             You will be redirected to Razorpay's secure
                             payment window.
                         </small>
+
                     </div>
 
                 </div>
+
             </div>
 
         </div>
+
     </div>
+
 </div>
 
 @endsection
@@ -93,30 +138,86 @@
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
 <script>
+
 $(document).ready(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Read Booking Information
+    | Server-side Booking Data
     |--------------------------------------------------------------------------
     */
 
-    const bookingRefNo =
-        sessionStorage.getItem('bookingRefNo');
+    const serverBookingRefNo = @json($blockData['refNo'] ?? '');
 
-    const selectedBus =
-        JSON.parse(sessionStorage.getItem('selectedBus') || '{}');
+    const serverTotalAmount = parseFloat(
+        @json($blockData['totalAmount'] ?? 0)
+    ) || 0;
 
-    const selectedSeats =
-        JSON.parse(sessionStorage.getItem('selectedSeats') || '[]');
 
-    const totalAmount =
-        parseFloat(sessionStorage.getItem('totalAmount') || '0');
+    /*
+    |--------------------------------------------------------------------------
+    | Browser Booking Data
+    |--------------------------------------------------------------------------
+    */
 
-    const bookingBlockData =
-        JSON.parse(
-            sessionStorage.getItem('bookingBlockData') || '{}'
+    const selectedSeats = JSON.parse(
+        sessionStorage.getItem('selectedSeats') || '[]'
+    );
+
+    const bookingBlockData = JSON.parse(
+        sessionStorage.getItem('bookingBlockData') || '{}'
+    );
+
+    const bookingEmail =
+        sessionStorage.getItem('bookingEmail') || '';
+
+    const bookingPhone =
+        sessionStorage.getItem('bookingPhone') || '';
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Booking Reference
+    |--------------------------------------------------------------------------
+    |
+    | IMPORTANT:
+    | Use Laravel session as the source of truth.
+    |
+    */
+
+    const bookingRefNo = serverBookingRefNo;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Total Amount
+    |--------------------------------------------------------------------------
+    */
+
+    let totalAmount = serverTotalAmount;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Fallback Amount
+    |--------------------------------------------------------------------------
+    |
+    | Only used for display if the server session does not contain
+    | totalAmount.
+    |
+    */
+
+    if (!totalAmount || totalAmount <= 0) {
+
+        const sessionAmount = parseFloat(
+            sessionStorage.getItem('totalAmount') || '0'
         );
+
+        if (sessionAmount > 0) {
+            totalAmount = sessionAmount;
+        }
+
+    }
 
 
     /*
@@ -132,7 +233,8 @@ $(document).ready(function () {
             'Booking reference not found. Please start the booking again.'
         );
 
-        $('#payNowBtn').prop('disabled', true);
+        $('#payNowBtn')
+            .prop('disabled', true);
 
         return;
     }
@@ -145,7 +247,8 @@ $(document).ready(function () {
             'Invalid booking amount.'
         );
 
-        $('#payNowBtn').prop('disabled', true);
+        $('#payNowBtn')
+            .prop('disabled', true);
 
         return;
     }
@@ -153,26 +256,40 @@ $(document).ready(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Display Booking Information
+    | Display Booking Reference
     |--------------------------------------------------------------------------
     */
 
-    $('#bookingRefNo').text(bookingRefNo);
+    $('#bookingRefNo').text(
+        bookingRefNo
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Display Selected Seats
+    |--------------------------------------------------------------------------
+    */
 
     if (selectedSeats.length > 0) {
 
-        const seatNames = selectedSeats.map(function (seat) {
+        const seatNames = selectedSeats
+            .map(function (seat) {
 
-            if (typeof seat === 'object') {
-                return seat.name ||
-                       seat.id ||
-                       seat.key ||
-                       '';
-            }
+                if (typeof seat === 'object') {
 
-            return seat;
+                    return seat.name ||
+                           seat.id ||
+                           seat.key ||
+                           '';
 
-        }).filter(Boolean);
+                }
+
+                return seat;
+
+            })
+            .filter(Boolean);
+
 
         $('#selectedSeats').text(
             seatNames.join(', ')
@@ -181,11 +298,29 @@ $(document).ready(function () {
     } else {
 
         $('#selectedSeats').text('--');
+
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Display Amount
+    |--------------------------------------------------------------------------
+    */
+
     $('#totalAmount').text(
         '₹' + totalAmount.toFixed(2)
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pay Button Text
+    |--------------------------------------------------------------------------
+    */
+
+    $('#payNowBtn').text(
+        'Pay ₹' + totalAmount.toFixed(2)
     );
 
 
@@ -212,8 +347,9 @@ $(document).ready(function () {
 
         const button = $('#payNowBtn');
 
-        button.prop('disabled', true);
-        button.text('Preparing Payment...');
+        button
+            .prop('disabled', true)
+            .text('Preparing Payment...');
 
         hideMessage();
 
@@ -225,10 +361,15 @@ $(document).ready(function () {
             type: 'POST',
 
             data: {
-    _token: "{{ csrf_token() }}",
-    refNo: bookingRefNo,
-    amount: totalAmount
-},
+
+                _token: "{{ csrf_token() }}",
+
+                refNo: bookingRefNo,
+
+                amount: totalAmount
+
+            },
+
 
             success: function (response) {
 
@@ -252,12 +393,6 @@ $(document).ready(function () {
                 }
 
 
-                /*
-                |--------------------------------------------------------------------------
-                | Razorpay Order
-                |--------------------------------------------------------------------------
-                */
-
                 const order = response.order;
 
 
@@ -276,7 +411,7 @@ $(document).ready(function () {
 
                 /*
                 |--------------------------------------------------------------------------
-                | Store Order Information
+                | Store Razorpay Order ID
                 |--------------------------------------------------------------------------
                 */
 
@@ -288,13 +423,14 @@ $(document).ready(function () {
 
                 /*
                 |--------------------------------------------------------------------------
-                | Open Razorpay Checkout
+                | Open Razorpay
                 |--------------------------------------------------------------------------
                 */
 
                 openRazorpayCheckout(order);
 
             },
+
 
             error: function (xhr) {
 
@@ -315,6 +451,7 @@ $(document).ready(function () {
 
                     message =
                         xhr.responseJSON.message;
+
                 }
 
 
@@ -325,6 +462,7 @@ $(document).ready(function () {
 
 
                 resetPayButton();
+
             }
 
         });
@@ -357,7 +495,7 @@ $(document).ready(function () {
 
             /*
             |--------------------------------------------------------------------------
-            | Prefill Customer Details
+            | Customer Details
             |--------------------------------------------------------------------------
             */
 
@@ -367,10 +505,10 @@ $(document).ready(function () {
                     sessionStorage.getItem('passengerName') || '',
 
                 email:
-                    sessionStorage.getItem('bookingEmail') || '',
+                    bookingEmail,
 
                 contact:
-                    sessionStorage.getItem('bookingPhone') || ''
+                    bookingPhone
 
             },
 
@@ -390,7 +528,7 @@ $(document).ready(function () {
 
             /*
             |--------------------------------------------------------------------------
-            | Payment Success Handler
+            | Payment Success
             |--------------------------------------------------------------------------
             */
 
@@ -464,6 +602,7 @@ $(document).ready(function () {
 
                     message =
                         response.error.description;
+
                 }
 
 
@@ -495,7 +634,6 @@ $(document).ready(function () {
         $('#payNowBtn')
             .prop('disabled', true)
             .text('Verifying Payment...');
-
 
         hideMessage();
 
@@ -590,6 +728,7 @@ $(document).ready(function () {
                             'ticketNumber',
                             response.booking.tktNo
                         );
+
                     }
 
 
@@ -599,6 +738,7 @@ $(document).ready(function () {
                             'pnrNumber',
                             response.booking.pnrNo
                         );
+
                     }
 
                 }
@@ -651,6 +791,7 @@ $(document).ready(function () {
 
                     message =
                         xhr.responseJSON.message;
+
                 }
 
 
@@ -703,21 +844,13 @@ $(document).ready(function () {
         $('#payNowBtn')
             .prop('disabled', false)
             .text(
-     t
-razorpay_order_id
-razorpay_payment_id
-razorpay_signature           'Pay ₹' +
-                totalAmount.toFixed(2)
+                'Pay ₹' + totalAmount.toFixed(2)
             );
 
     }
 
 });
+
 </script>
 
 @endsection
-
-
-
-
-

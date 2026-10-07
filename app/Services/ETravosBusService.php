@@ -804,11 +804,26 @@ class ETravosBusService
             ]
         );
 
-        return $this->sendRequest(
-            '/bus/block',
-            $payload,
-            'POST'
-        );
+       
+$response = $this->sendRequest('/bus/block', $payload, 'POST');
+
+$tripResult = $response['trips'][0] ?? [];
+$tripError = $tripResult['error'] ?? null;
+
+\Illuminate\Support\Facades\Log::info('eTravos BLOCK diagnostic', [
+    'traceId' => $response['traceId'] ?? $traceId,
+    'trip_status' => $tripResult['status'] ?? null,
+    'trip_error_code' => is_array($tripError)
+        ? ($tripError['code'] ?? null)
+        : null,
+    'trip_error_description' => is_array($tripError)
+        ? ($tripError['desc'] ?? null)
+        : null,
+    'has_refNo' => !empty($tripResult['refNo'])
+        || !empty($response['refNo']),
+]);
+
+return $response;
     }
 
     /**
