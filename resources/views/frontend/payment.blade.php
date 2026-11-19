@@ -73,12 +73,13 @@
                                 Total Amount
                             </div>
 
-                            <div
-                                class="col-6 text-end fw-bold fs-5"
-                                id="totalAmount"
-                            >
-                                ₹0.00
-                            </div>
+                          <div
+    class="col-6 text-end fw-bold text-primary"
+    id="totalAmount"
+    style="font-size: 22px;"
+>
+    ₹0.00
+</div>
 
                         </div>
 

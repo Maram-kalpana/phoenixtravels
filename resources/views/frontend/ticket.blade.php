@@ -4,7 +4,7 @@
 
 @section('content')
 
-<div class="container py-5">
+<div class="container pb-5" style="padding-top: 190px;">
 
     <div class="text-center mb-4">
         <div style="
@@ -423,41 +423,120 @@ if (!bookingData) {
          * Try to get journey information
          * from block data if available.
          */
-        if (bookingBlockData) {
+        
+        
+        /*
+         * Display journey details
+         */
+        let selectedBus = {};
 
-            $('#source').text(
-                bookingBlockData.source ||
-                bookingBlockData.src ||
-                '-'
+        try {
+            selectedBus = JSON.parse(
+                sessionStorage.getItem('selectedBus') || '{}'
             );
-
-            $('#destination').text(
-                bookingBlockData.destination ||
-                bookingBlockData.dst ||
-                '-'
-            );
-
-            $('#journeyDate').text(
-                bookingBlockData.journeyDate ||
-                bookingBlockData.doj ||
-                '-'
-            );
-
-            $('#busName').text(
-                bookingBlockData.busName ||
-                bookingBlockData.name ||
-                '-'
-            );
-
-        } else {
-
-            $('#source').text('-');
-            $('#destination').text('-');
-            $('#journeyDate').text('-');
-            $('#busName').text('-');
-
+        } catch (error) {
+            console.error('Selected bus data error:', error);
         }
 
+        const block = bookingBlockData || {};
+        const blockData = block.data || block;
+        const blockTrip = blockData.trips?.[0] || {};
+        const selectedTrip = selectedBus.trip || selectedBus;
+
+        console.log('Journey details diagnostic:', {
+            blockKeys: Object.keys(block),
+            blockDataKeys: Object.keys(blockData),
+            blockTripKeys: Object.keys(blockTrip),
+            selectedBusKeys: Object.keys(selectedBus)
+        });
+
+        const source =
+            block.source ||
+            block.src ||
+            block.from ||
+            block.fromCity ||
+            blockData.src ||
+            blockData.source ||
+            blockTrip.src ||
+            blockTrip.source ||
+            selectedTrip.src ||
+            selectedTrip.source ||
+            selectedTrip.origin ||
+            selectedTrip.fromCity ||
+            selectedTrip.from ||
+            '-';
+
+        const destination =
+            block.destination ||
+            block.dst ||
+            block.to ||
+            block.toCity ||
+            blockData.dst ||
+            blockData.destination ||
+            blockTrip.dst ||
+            blockTrip.destination ||
+            selectedTrip.dst ||
+            selectedTrip.destination ||
+            selectedTrip.toCity ||
+            selectedTrip.to ||
+            '-';
+let searchParams = {};
+let seatLayoutData = {};
+
+try {
+    searchParams = JSON.parse(sessionStorage.getItem('searchParams') || '{}');
+} catch (e) {}
+
+try {
+    seatLayoutData = JSON.parse(sessionStorage.getItem('seatLayoutData') || '{}');
+} catch (e) {}
+
+function parseDate(value) {
+    if (!value) return null;
+
+    // dd-mm-yyyy (the format your search sends)
+    const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value);
+    if (dmy) return new Date(+dmy[3], +dmy[2] - 1, +dmy[1]);
+
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+const rawJourneyDate =
+    seatLayoutData.summary?.doj ||
+    searchParams.departure_date ||
+    blockTrip.doj ||
+    block.doj ||
+    selectedTrip.doj ||
+    selectedTrip.bus_start_time ||
+    '';
+
+const parsedDate = parseDate(rawJourneyDate);
+
+const journeyDate = parsedDate
+    ? parsedDate.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+    })
+    : (rawJourneyDate || '-');
+
+        const busName =
+            block.busName ||
+            block.name ||
+            blockData.busName ||
+            blockTrip.busName ||
+            blockTrip.name ||
+            selectedTrip.busName ||
+            selectedTrip.name ||
+            selectedTrip.operatorName ||
+            selectedTrip.travelsName ||
+            '-';
+
+        $('#source').text(source);
+        $('#destination').text(destination);
+        $('#journeyDate').text(journeyDate);
+        $('#busName').text(busName);
 
         /*
          * Render passengers

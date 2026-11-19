@@ -162,12 +162,13 @@ class BusController extends Controller
 
             // Check for errors
             if (isset($result['error']) && $result['error'] === true) {
-                return response()->json([
-                    'success' => false,
-                    'message' => $result['message'] ?? 'No buses found for the selected route',
-                    'trace_id' => $result['traceId'] ?? null
-                ], 404);
-            }
+    Log::error('eTravos search failed', ['result' => $result]);
+    return response()->json([
+        'success' => false,
+        'message' => $result['message'] ?? 'Bus search failed.',
+        'trace_id' => $result['traceId'] ?? null
+    ], 502);
+}
 
             // Format response for frontend
             $formattedBuses = $this->formatBusResults($result, $request->all());
